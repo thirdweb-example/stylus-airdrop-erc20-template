@@ -57,11 +57,9 @@ const EIP712_DOMAIN_TYPEHASH: B256 =
 
 #[public]
 impl AirdropERC20 {
-    #[payable]
-    pub fn initialize(&mut self) {
-        // TODO: initializer checks
-        assert!(self.owner.get() == Address::ZERO, "init");
-        self.owner.set(msg::sender());
+    #[constructor]
+    pub fn constructor(&mut self, owner: Address) {
+        let _ = self.owner.set(owner);
     }
 
     #[payable]
