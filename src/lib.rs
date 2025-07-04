@@ -33,7 +33,7 @@ sol! {
 
 sol_storage! {
     #[entrypoint]
-    pub struct AirdropERC20 {
+    pub struct StylusAirdropERC20 {
         address owner;
 
         mapping(address => uint64) tokenConditionId;
@@ -56,7 +56,7 @@ const EIP712_DOMAIN_TYPEHASH: B256 =
  b256!("8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f");
 
 #[public]
-impl AirdropERC20 {
+impl StylusAirdropERC20 {
     #[constructor]
     pub fn constructor(&mut self, owner: Address) {
         let _ = self.owner.set(owner);
@@ -184,7 +184,7 @@ impl AirdropERC20 {
     pub fn owner_addr(&self) -> Address { self.owner.get() }
 }
 
-impl AirdropERC20 {
+impl StylusAirdropERC20 {
     #[inline(always)]
     fn only_owner(&self) {
         assert!(msg::sender() == self.owner.get(), "NA");
