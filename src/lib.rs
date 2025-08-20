@@ -5,7 +5,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use alloy_primitives::{b256, U64};
-use alloy_sol_types::{sol, SolType};
+use alloy_sol_types::sol;
 use stylus_sdk::{
     alloy_primitives::{Address, B256, U256}, call::RawCall, crypto, prelude::*
 };
@@ -81,24 +81,20 @@ impl StylusAirdropERC20 {
         let _ = self.owner.set(owner);
     }
 
-    #[payable]
-    pub fn airdrop(
+    #[selector(name = "airdropERC20")]
+    pub fn airdrop_erc20(
         &mut self,
         token:      Address,
-        recipients: Vec<Address>,
-        amounts:    Vec<U256>,
+        contents: Vec<(Address, U256)>,
     ) -> Result<(), AirdropErrors> {
-        if recipients.len() != amounts.len() {
-            return Err(AirdropErrors::AirdropError(AirdropError { code: ERROR_LENGTH_MISMATCH }));
-        }
 
         let erc20 = IERC20::from(token);
         let sender = self.vm().msg_sender();
 
-        for i in 0..recipients.len() {
+        for (recipient, amount) in &contents {
             let config = Call::new_mutating(self);
             erc20
-                .transfer_from(self.vm(), config, sender, recipients[i], amounts[i])
+                .transfer_from(self.vm(), config, sender, *recipient, *amount)
                 .expect("fail");
         }
 
@@ -107,14 +103,14 @@ impl StylusAirdropERC20 {
     }
 
     #[payable]
-    pub fn claim(
+    #[selector(name = "claimERC20")]
+    pub fn claim_erc20(
         &mut self,
         token:   Address,
+        receiver: Address,
         amount:  U256,
         proofs:  Vec<B256>,
     ) -> Result<(), AirdropErrors> {
-        let receiver = self.vm().msg_sender();
-
         // 1. root must exist
         let root = self.tokenMerkleRoot.get(token);
         if root == B256::ZERO {
@@ -149,46 +145,51 @@ impl StylusAirdropERC20 {
     }
 
     #[payable]
-    pub fn airdrop_erc20_with_sig(
+    #[selector(name = "airdropERC20WithSignature")]
+    pub fn airdrop_erc20_with_signature(
         &mut self,
-        req_raw: Vec<u8>,
-        sig: [u8; 65],
+        req: (B256, Address, U256, Vec<(Address, U256)>),
+        signature: [u8; 65],
     ) -> Result<(), AirdropErrors> {
-        // 1. decode req from raw bytes
-        let req_tuple: <AirdropRequestERC20 as SolType>::RustType = <AirdropRequestERC20 as SolType>::abi_decode(&req_raw)
-        .unwrap();
+        // 1. Convert tuple to struct for easier access
+        let contents: Vec<AirdropContentERC20> = req.3.iter().map(|(recipient, amount)| {
+            AirdropContentERC20 {
+                recipient: *recipient,
+                amount: *amount,
+            }
+        }).collect();
 
-        let req = AirdropRequestERC20 {
-            uid:                 req_tuple.uid,
-            tokenAddress:        req_tuple.tokenAddress,
-            expirationTimestamp: req_tuple.expirationTimestamp,
-            contents:            req_tuple.contents,
+        let request = AirdropRequestERC20 {
+            uid: req.0,
+            tokenAddress: req.1,
+            expirationTimestamp: req.2,
+            contents,
         };
 
         // 2. checks
-        let expiry = req.expirationTimestamp; 
+        let expiry = request.expirationTimestamp; 
         let now = U256::from(self.vm().block_timestamp());
         if now > expiry {
             return Err(AirdropErrors::AirdropError(AirdropError { code: ERROR_REQUEST_EXPIRED }));
         }
 
-        let uid_used = self.processed.get(req.uid);
+        let uid_used = self.processed.get(request.uid);
         if uid_used {
             return Err(AirdropErrors::AirdropError(AirdropError { code: ERROR_UID_ALREADY_USED }));
         }
 
         let owner = self.owner.get();
-        if !self.is_valid_sig(&req, &sig, owner) {
+        if !self.is_valid_sig(&request, &signature, owner) {
             return Err(AirdropErrors::AirdropError(AirdropError { code: ERROR_INVALID_SIGNATURE }));
         }
 
         // 3. mark uid as processed
-        self.processed.insert(req.uid, true);
+        self.processed.insert(request.uid, true);
 
         // 4. transfer
-        let erc20 = IERC20::from(req.tokenAddress);
+        let erc20 = IERC20::from(request.tokenAddress);
 
-        for c in &req.contents {
+        for c in &request.contents {
             let config = Call::new_mutating(self);
             erc20
                 .transfer_from(self.vm(), config, owner, c.recipient, c.amount)
@@ -202,17 +203,17 @@ impl StylusAirdropERC20 {
     pub fn set_merkle_root(
         &mut self,
         token: Address,
-        root:  B256,
-        reset: bool,
+        token_merkle_root:  B256,
+        reset_claim_status: bool,
     ) -> Result<(), AirdropErrors> {
-        self.only_owner();
+        self.only_owner()?;
 
-        if reset || self.tokenConditionId.get(token) == U64::from(0) {
+        if reset_claim_status || self.tokenConditionId.get(token) == U64::from(0) {
             let next = self.tokenConditionId.get(token) + U64::from(1u8);
             self.tokenConditionId.insert(token, next);
         }
 
-        self.tokenMerkleRoot.insert(token, root);
+        self.tokenMerkleRoot.insert(token, token_merkle_root);
         
         // TODO: emit log
         Ok(())
