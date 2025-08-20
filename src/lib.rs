@@ -96,8 +96,9 @@ impl StylusAirdropERC20 {
         let sender = self.vm().msg_sender();
 
         for i in 0..recipients.len() {
+            let config = Call::new_mutating(self);
             erc20
-                .transfer_from(&mut *self, sender, recipients[i], amounts[i])
+                .transfer_from(self.vm(), config, sender, recipients[i], amounts[i])
                 .expect("fail");
         }
 
@@ -137,9 +138,10 @@ impl StylusAirdropERC20 {
 
         // 4. transfer
         let erc20 = IERC20::from(token);
+        let config = Call::new_mutating(self);
         let owner = self.owner.get();
         erc20
-            .transfer_from(&mut *self, owner, receiver, amount)
+            .transfer_from(self.vm(), config, owner, receiver, amount)
             .expect("fail");
 
         // TODO: event
@@ -153,7 +155,7 @@ impl StylusAirdropERC20 {
         sig: [u8; 65],
     ) -> Result<(), AirdropErrors> {
         // 1. decode req from raw bytes
-        let req_tuple: <AirdropRequestERC20 as SolType>::RustType = <AirdropRequestERC20 as SolType>::abi_decode(&req_raw, true)
+        let req_tuple: <AirdropRequestERC20 as SolType>::RustType = <AirdropRequestERC20 as SolType>::abi_decode(&req_raw)
         .unwrap();
 
         let req = AirdropRequestERC20 {
@@ -187,8 +189,9 @@ impl StylusAirdropERC20 {
         let erc20 = IERC20::from(req.tokenAddress);
 
         for c in &req.contents {
+            let config = Call::new_mutating(self);
             erc20
-                .transfer_from(&mut *self, owner, c.recipient, c.amount)
+                .transfer_from(self.vm(), config, owner, c.recipient, c.amount)
                 .expect("fail"); // transfer failed
         }
 
@@ -253,7 +256,7 @@ impl StylusAirdropERC20 {
             &struct_hash[..],
         ].concat());
 
-        match ecrecover(digest, sig) {
+        match ecrecover(digest, sig, &*self.vm()) {
             Some(addr) => addr == owner,
             None => false,
         }
@@ -328,7 +331,7 @@ fn hash_request(req: &AirdropRequestERC20, contents_hash: B256) -> B256 {
     ].concat())
 }
 
-fn ecrecover(digest: B256, sig: &[u8; 65]) -> Option<Address> {
+fn ecrecover(digest: B256, sig: &[u8; 65], host: &dyn stylus_sdk::prelude::Host) -> Option<Address> {
     let (r, s, v) = (&sig[0..32], &sig[32..64], sig[64]);
 
     if v != 27 && v != 28 { return None }
@@ -345,7 +348,7 @@ fn ecrecover(digest: B256, sig: &[u8; 65]) -> Option<Address> {
         Address::from(bytes)
     };
     let out = unsafe {
-        RawCall::new()
+        RawCall::new(host)
             .gas(25_000)                    
             .call(precompile_addr,
                   &input)
